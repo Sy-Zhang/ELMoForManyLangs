@@ -203,7 +203,5 @@ class Model(nn.Module):
     return encoder_output
 
   def load_model(self, path):
-    self.token_embedder.load_state_dict(torch.load(os.path.join(path, 'token_embedder.pkl'),
-                                                   map_location=lambda storage, loc: storage))
-    self.encoder.load_state_dict(torch.load(os.path.join(path, 'encoder.pkl'),
-                                            map_location=lambda storage, loc: storage))
+    self.token_embedder.load_state_dict(torch.load(os.path.join(path, 'token_embedder.pkl'), map_location='cpu'))
+    self.encoder.load_state_dict(torch.load(os.path.join(path, 'encoder.pkl'), map_location='cpu'))
