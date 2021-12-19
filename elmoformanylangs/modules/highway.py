@@ -44,8 +44,8 @@ class Highway(torch.nn.Module):
             layer.bias[input_dim:].data.fill_(1)
 
     @overrides(check_signature=False)
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:  # pylint: disable=arguments-differ
-        current_input = inputs
+    def forward(self, *input: torch.Tensor) -> type(None):  # pylint: disable=arguments-differ
+        current_input = input[0]
         for layer in self._layers:
             projected_input = layer(current_input)
             linear_part = current_input
