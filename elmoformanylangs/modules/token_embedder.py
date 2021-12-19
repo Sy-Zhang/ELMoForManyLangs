@@ -29,14 +29,16 @@ class LstmTokenEmbedder(nn.Module):
 
   def forward(self, word_inp, chars_inp, shape):
     embs = []
+    word_inp = word_inp.to(next(network.parameters()).device)
+    chars_inp = chars_inp.to(next(network.parameters()).device)
     batch_size, seq_len = shape
     if self.word_emb_layer is not None:
-      word_emb = self.word_emb_layer(word_inp.to((next(network.parameters()).device))
+      word_emb = self.word_emb_layer(word_inp)
       embs.append(word_emb)
 
     if self.char_emb_layer is not None:
       chars_inp = chars_inp.view(batch_size * seq_len, -1)
-      chars_emb = self.char_emb_layer(chars_inp.to((next(network.parameters()).device))
+      chars_emb = self.char_emb_layer()
       _, (chars_outputs, __) = self.char_lstm(chars_emb)
       chars_outputs = chars_outputs.contiguous().view(-1, self.config['token_embedder']['char_dim'] * 2)
       embs.append(chars_outputs)
@@ -87,16 +89,18 @@ class ConvTokenEmbedder(nn.Module):
     
   def forward(self, word_inp, chars_inp, shape):
     embs = []
+    word_inp = word_inp.to(next(network.parameters()).device)
+    chars_inp = chars_inp.to(next(network.parameters()).device)
     batch_size, seq_len = shape
     if self.word_emb_layer is not None:
       batch_size, seq_len = word_inp.size(0), word_inp.size(1)
-      word_emb = self.word_emb_layer(word_inp.to((next(network.parameters()).device))
+      word_emb = self.word_emb_layer(word_inp)
       embs.append(word_emb)
 
     if self.char_emb_layer is not None:
       chars_inp = chars_inp.view(batch_size * seq_len, -1)
 
-      character_embedding = self.char_emb_layer(chars_inp.to((next(network.parameters()).device))
+      character_embedding = self.char_emb_layer(chars_inp)
 
       character_embedding = torch.transpose(character_embedding, 1, 2)
 
