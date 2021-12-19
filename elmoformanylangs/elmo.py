@@ -203,7 +203,7 @@ class Embedder(object):
 
         after_elmo = []
         for w, c, lens, masks, texts in zip(test_w, test_c, test_lens, test_masks, test_text):
-            output = self.model.forward(w.cuda(), c.cuda(), masks.cuda())
+            output = self.model.forward(w, c, masks)
             for i, text in enumerate(texts):
 
                 if self.config['encoder']['name'].lower() == 'lstm':
