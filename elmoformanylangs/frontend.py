@@ -188,7 +188,7 @@ class Model(nn.Module):
     """
     token_embedding = self.token_embedder(word_inp, chars_package, (mask_package[0].size(0), mask_package[0].size(1)))
     if self.config['encoder']['name'] == 'elmo':
-      mask = Variable(mask_package[0]).cuda() if self.use_cuda else Variable(mask_package[0])
+      mask = mask_package[0].to(next(self.parameters()).device)
       encoder_output = self.encoder(token_embedding, mask)
       sz = encoder_output.size()
       token_embedding = torch.cat(
