@@ -16,6 +16,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from .modules.elmo import ElmobiLm
+from .elmo import Embedder
 from .modules.lstm import LstmbiLm
 from .modules.token_embedder import ConvTokenEmbedder, LstmTokenEmbedder
 from .modules.embedding_layer import EmbeddingLayer
@@ -25,7 +26,7 @@ from .utils import dict2namedtuple
 from collections import Counter
 import numpy as np
 
-logger = logging.getLogger('elmoformanylangs')
+logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(levelname)s: %(message)s')
 
 
 def divide(data, valid_size):
@@ -197,7 +198,7 @@ def create_batches(x, batch_size, word2id, char2id, config, perm=None, shuffle=T
     batches_lens = [batches_lens[i] for i in perm]
     batches_masks = [batches_masks[i] for i in perm]
 
-  logger.info("{} batches, avg len: {:.1f}".format(nbatch, sum_len / len(x)))
+  logging.info("{} batches, avg len: {:.1f}".format(nbatch, sum_len / len(x)))
   return batches_w, batches_c, batches_lens, batches_masks
 
 
@@ -280,8 +281,14 @@ class Model(nn.Module):
       torch.save(self.classify_layer.state_dict(), os.path.join(path, 'classifier.pkl'))
 
   def load_model(self, path):
-    self.token_embedder.load_state_dict(torch.load(os.path.join(path, 'token_embedder.pkl')))
-    self.encoder.load_state_dict(torch.load(os.path.join(path, 'encoder.pkl')))
+    
+    self.token_embedder.load_state_dict(torch.load(os.path.join(path, 'token_embedder.pkl'),
+                                                   map_location=lambda storage, loc: storage))
+    self.encoder.load_state_dict(torch.load(os.path.join(path, 'encoder.pkl'),
+                                            map_location=lambda storage, loc: storage))
+    
+    #self.token_embedder.load_state_dict(torch.load(os.path.join(path, 'token_embedder.pkl')))
+    #self.encoder.load_state_dict(torch.load(os.path.join(path, 'encoder.pkl')))
     self.classify_layer.load_state_dict(torch.load(os.path.join(path, 'classifier.pkl')))
 
 
@@ -340,7 +347,7 @@ def train_model(epoch, opt, model, optimizer,
     loss_forward, loss_backward = model.forward(w, c, masks)
 
     loss = (loss_forward + loss_backward) / 2.0
-    total_loss += loss_forward.data[0]
+    total_loss += loss_forward.item()
     n_tags = sum(lens)
     total_tag += n_tags
     loss.backward()
@@ -348,7 +355,7 @@ def train_model(epoch, opt, model, optimizer,
     torch.nn.utils.clip_grad_norm(model.parameters(), opt.clip_grad)
     optimizer.step()
     if cnt * opt.batch_size % 1024 == 0:
-      logger.info("Epoch={} iter={} lr={:.6f} train_ppl={:.6f} time={:.2f}s".format(
+      logging.info("Epoch={} iter={} lr={:.6f} train_ppl={:.6f} time={:.2f}s".format(
         epoch, cnt, optimizer.param_groups[0]['lr'],
         np.exp(total_loss / total_tag), time.time() - start_time
       ))
@@ -357,25 +364,25 @@ def train_model(epoch, opt, model, optimizer,
     if cnt % opt.eval_steps == 0 or cnt % len(train_w) == 0:
       if valid is None:
         train_ppl = np.exp(total_loss / total_tag)
-        logger.info("Epoch={} iter={} lr={:.6f} train_ppl={:.6f}".format(
+        logging.info("Epoch={} iter={} lr={:.6f} train_ppl={:.6f}".format(
           epoch, cnt, optimizer.param_groups[0]['lr'], train_ppl))
         if train_ppl < best_train:
           best_train = train_ppl
-          logger.info("New record achieved on training dataset!")
+          logging.info("New record achieved on training dataset!")
           model.save_model(opt.model, opt.save_classify_layer)      
       else:
         valid_ppl = eval_model(model, valid)
-        logger.info("Epoch={} iter={} lr={:.6f} valid_ppl={:.6f}".format(
+        logging.info("Epoch={} iter={} lr={:.6f} valid_ppl={:.6f}".format(
           epoch, cnt, optimizer.param_groups[0]['lr'], valid_ppl))
 
         if valid_ppl < best_valid:
           model.save_model(opt.model, opt.save_classify_layer)
           best_valid = valid_ppl
-          logger.info("New record achieved!")
+          logging.info("New record achieved!")
 
           if test is not None:
             test_result = eval_model(model, test)
-            logger.info("Epoch={} iter={} lr={:.6f} test_ppl={:.6f}".format(
+            logging.info("Epoch={} iter={} lr={:.6f} test_ppl={:.6f}".format(
               epoch, cnt, optimizer.param_groups[0]['lr'], test_result))
   return best_train, best_valid, test_result
 
@@ -400,8 +407,8 @@ def get_truncated_vocab(dataset, min_count):
       break
     i += 1
 
-  logger.info('Truncated word count: {0}.'.format(sum([count for word, count in word_count[i:]])))
-  logger.info('Original vocabulary size: {0}.'.format(len(word_count)))
+  logging.info('Truncated word count: {0}.'.format(sum([count for word, count in word_count[i:]])))
+  logging.info('Original vocabulary size: {0}.'.format(len(word_count)))
   return word_count[:i]
 
 
@@ -440,6 +447,12 @@ def train():
 
   cmd.add_argument('--valid_size', type=int, default=0, help="size of validation dataset when there's no valid.")
   cmd.add_argument('--eval_steps', required=False, type=int, help='report every xx batches.')
+  
+   
+  cmd.add_argument('--fine_tune', required=False, action="store_true", help='finetune base model')
+  cmd.add_argument('--old_model_folder', required=False, type=str, help='path to base model for finetuning')
+
+
 
   opt = cmd.parse_args(sys.argv[2:])
 
@@ -469,7 +482,7 @@ def train():
   else:
     raise ValueError('Unknown token embedder name: {}'.format(token_embedder_name))
 
-  logger.info('training instance: {}, training tokens: {}.'.format(len(train_data),
+  logging.info('training instance: {}, training tokens: {}.'.format(len(train_data),
                                                                     sum([len(s) - 1 for s in train_data])))
 
   if opt.valid_path is not None:
@@ -479,13 +492,13 @@ def train():
       valid_data = read_corpus(opt.valid_path, opt.max_sent_len)
     else:
       raise ValueError('Unknown token embedder name: {}'.format(token_embedder_name))
-    logger.info('valid instance: {}, valid tokens: {}.'.format(len(valid_data),
+    logging.info('valid instance: {}, valid tokens: {}.'.format(len(valid_data),
                                                                 sum([len(s) - 1 for s in valid_data])))
   elif opt.valid_size > 0:
     train_data, valid_data = divide(train_data, opt.valid_size)
-    logger.info('training instance: {}, training tokens after division: {}.'.format(
+    logging.info('training instance: {}, training tokens after division: {}.'.format(
       len(train_data), sum([len(s) - 1 for s in train_data])))
-    logger.info('valid instance: {}, valid tokens: {}.'.format(
+    logging.info('valid instance: {}, valid tokens: {}.'.format(
       len(valid_data), sum([len(s) - 1 for s in valid_data])))
   else:
     valid_data = None
@@ -497,53 +510,67 @@ def train():
       test_data = read_corpus(opt.test_path, opt.max_sent_len)
     else:
       raise ValueError('Unknown token embedder name: {}'.format(token_embedder_name))
-    logger.info('testing instance: {}, testing tokens: {}.'.format(
+    logging.info('testing instance: {}, testing tokens: {}.'.format(
       len(test_data), sum([len(s) - 1 for s in test_data])))
   else:
     test_data = None
+  
+  if opt.fine_tune:
+        embedder = Embedder(opt.old_model_folder)        
+        word_lexicon = embedder.word_lexicon
+        char_lexicon = embedder.char_lexicon 
+        label_to_ix = word_lexicon
+        embs = None    
 
-  if opt.word_embedding is not None:
-    embs = load_embedding(opt.word_embedding)
-    word_lexicon = {word: i for i, word in enumerate(embs[0])}  
-  else:
-    embs = None
-    word_lexicon = {}
-
+        
   # Maintain the vocabulary. vocabulary is used in either WordEmbeddingInput or softmax classification
   vocab = get_truncated_vocab(train_data, opt.min_count)
+  if opt.fine_tune:
+      if opt.word_embedding is not None:
+        embs = load_embedding(opt.word_embedding)
+        word_lexicon = {word: i for i, word in enumerate(embs[0])}  
+      else:
+        embs = None
+        word_lexicon = {}
 
-  # Ensure index of '<oov>' is 0
-  for special_word in ['<oov>', '<bos>', '<eos>',  '<pad>']:
-    if special_word not in word_lexicon:
-      word_lexicon[special_word] = len(word_lexicon)
 
-  for word, _ in vocab:
-    if word not in word_lexicon:
-      word_lexicon[word] = len(word_lexicon)
+      # Ensure index of '<oov>' is 0
+      for special_word in ['<oov>', '<bos>', '<eos>',  '<pad>']:
+        if special_word not in word_lexicon:
+          word_lexicon[special_word] = len(word_lexicon)
+
+      for word, _ in vocab:
+        if word not in word_lexicon:
+          word_lexicon[word] = len(word_lexicon)
+
 
   # Word Embedding
   if config['token_embedder']['word_dim'] > 0:
     word_emb_layer = EmbeddingLayer(config['token_embedder']['word_dim'], word_lexicon, fix_emb=False, embs=embs)
-    logger.info('Word embedding size: {0}'.format(len(word_emb_layer.word2id)))
+    #print(word_emb_layer)
+    logging.info('Word embedding size: {0}'.format(len(word_emb_layer.word2id)))
   else:
     word_emb_layer = None
-    logger.info('Vocabulary size: {0}'.format(len(word_lexicon)))
+    logging.info('Vocabulary size: {0}'.format(len(word_lexicon)))
 
   # Character Lexicon
   if config['token_embedder']['char_dim'] > 0:
-    char_lexicon = {}
-    for sentence in train_data:
-      for word in sentence:
-        for ch in word:
-          if ch not in char_lexicon:
-            char_lexicon[ch] = len(char_lexicon)
+    
+    if opt.fine_tune:
+        
+        char_lexicon = {}
+        for sentence in train_data:
+          for word in sentence:
+            for ch in word:
+              if ch not in char_lexicon:
+                char_lexicon[ch] = len(char_lexicon)
 
-    for special_char in ['<bos>', '<eos>', '<oov>', '<pad>', '<bow>', '<eow>']:
-      if special_char not in char_lexicon:
-        char_lexicon[special_char] = len(char_lexicon)
+        for special_char in ['<bos>', '<eos>', '<oov>', '<pad>', '<bow>', '<eow>']:
+          if special_char not in char_lexicon:
+            char_lexicon[special_char] = len(char_lexicon)
 
     char_emb_layer = EmbeddingLayer(config['token_embedder']['char_dim'], char_lexicon, fix_emb=False)
-    logger.info('Char embedding size: {0}'.format(len(char_emb_layer.word2id)))
+    logging.info('Char embedding size: {0}'.format(len(char_emb_layer.word2id)))
   else:
     char_lexicon = None
     char_emb_layer = None
@@ -553,7 +580,7 @@ def train():
 
   if opt.eval_steps is None:
     opt.eval_steps = len(train[0])
-  logger.info('Evaluate every {0} batches.'.format(opt.eval_steps))
+  logging.info('Evaluate every {0} batches.'.format(opt.eval_steps))
 
   if valid_data is not None:
     valid = create_batches(
@@ -568,12 +595,20 @@ def train():
     test = None
 
   label_to_ix = word_lexicon
-  logger.info('vocab size: {0}'.format(len(label_to_ix)))
+  logging.info('vocab size: {0}'.format(len(label_to_ix)))
   
   nclasses = len(label_to_ix)
 
-  model = Model(config, word_emb_layer, char_emb_layer, nclasses, use_cuda)
-  logger.info(str(model))
+  if opt.fine_tunes:
+        model = Model(config, word_emb_layer, char_emb_layer, nclasses, use_cuda)
+  else:
+        model = Model(embedder.config, word_emb_layer, char_emb_layer, nclasses, use_cuda)
+        model.token_embedder = embedder.model.token_embedder
+        model.encoder = embedder.model.encoder
+
+
+        
+  logging.info(str(model))
   if use_cuda:
     model = model.cuda()
 
@@ -615,11 +650,11 @@ def train():
       optimizer.param_groups[0]['lr'] *= opt.lr_decay
 
   if valid_data is None:
-    logger.info("best train ppl: {:.6f}.".format(best_train))
+    logging.info("best train ppl: {:.6f}.".format(best_train))
   elif test_data is None:
-    logger.info("best train ppl: {:.6f}, best valid ppl: {:.6f}.".format(best_train, best_valid))
+    logging.info("best train ppl: {:.6f}, best valid ppl: {:.6f}.".format(best_train, best_valid))
   else:
-    logger.info("best train ppl: {:.6f}, best valid ppl: {:.6f}, test ppl: {:.6f}.".format(best_train, best_valid, test_result))
+    logging.info("best train ppl: {:.6f}, best valid ppl: {:.6f}, test ppl: {:.6f}.".format(best_train, best_valid, test_result))
 
 
 def test():
@@ -649,7 +684,7 @@ def test():
         token, i = tokens
         char_lexicon[token] = int(i)
     char_emb_layer = EmbeddingLayer(config['token_embedder']['char_dim'], char_lexicon, fix_emb=False)
-    logger.info('char embedding size: ' + str(len(char_emb_layer.word2id)))
+    logging.info('char embedding size: ' + str(len(char_emb_layer.word2id)))
   else:
     char_lexicon = None
     char_emb_layer = None
@@ -665,16 +700,17 @@ def test():
 
   if config['token_embedder']['word_dim'] > 0:
     word_emb_layer = EmbeddingLayer(config['token_embedder']['word_dim'], word_lexicon, fix_emb=False, embs=None)
-    logger.info('word embedding size: ' + str(len(word_emb_layer.word2id)))
+    logging.info('word embedding size: ' + str(len(word_emb_layer.word2id)))
   else:
     word_emb_layer = None
   
   model = Model(config, word_emb_layer, char_emb_layer, len(word_lexicon), use_cuda)
 
+
   if use_cuda:
     model.cuda()
 
-  logger.info(str(model))
+  logging.info(str(model))
   model.load_model(args.model)
   if config['token_embedder']['name'].lower() == 'cnn':
     test = read_corpus(args.input, config['token_embedder']['max_characters_per_token'], max_sent_len=10000)
@@ -688,7 +724,7 @@ def test():
 
   test_result = eval_model(model, (test_w, test_c, test_lens, test_masks))
 
-  logger.info("test_ppl={:.6f}".format(test_result))
+  logging.info("test_ppl={:.6f}".format(test_result))
 
 
 if __name__ == "__main__":
