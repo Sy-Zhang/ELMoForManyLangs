@@ -29,8 +29,8 @@ class LstmTokenEmbedder(nn.Module):
 
   def forward(self, word_inp, chars_inp, shape):
     embs = []
-    word_inp = word_inp.to(next(network.parameters()).device)
-    chars_inp = chars_inp.to(next(network.parameters()).device)
+    word_inp = word_inp.to(next(self.parameters()).device)
+    chars_inp = chars_inp.to(next(self.parameters()).device)
     batch_size, seq_len = shape
     if self.word_emb_layer is not None:
       word_emb = self.word_emb_layer(word_inp)
@@ -89,8 +89,8 @@ class ConvTokenEmbedder(nn.Module):
     
   def forward(self, word_inp, chars_inp, shape):
     embs = []
-    word_inp = word_inp.to(next(network.parameters()).device)
-    chars_inp = chars_inp.to(next(network.parameters()).device)
+    word_inp = word_inp.to(next(self.parameters()).device)
+    chars_inp = chars_inp.to(next(self.parameters()).device)
     batch_size, seq_len = shape
     if self.word_emb_layer is not None:
       batch_size, seq_len = word_inp.size(0), word_inp.size(1)
